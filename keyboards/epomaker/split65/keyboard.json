@@ -7,7 +7,7 @@
         "enabled": true,
         "matrix": [1, 0]
     },
-    "debounce": 1,
+    "debounce": 5,
     "diode_direction": "ROW2COL",
     "dynamic_keymap": {
         "layer_count": 8
