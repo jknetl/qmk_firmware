@@ -298,7 +298,18 @@ void suspend_power_down_user(void) {
 
 bool lpwr_is_allow_timeout_hook(void) {
 
-    if (wireless_get_current_devs() == DEVS_USB && is_keyboard_master()) {
+    /* Both halves run their own low-power state machine: wireless_task() calls
+     * lpwr_task() on the slave too. Guarding only the master left the right half
+     * free to time out into MCU STOP mode while wired, and
+     * lpwr_stop_hook_pre() (wls/wls.c) deliberately leaves the slave's LED rails
+     * powered -- so a sleeping right half keeps its backlight lit and simply
+     * stops responding. The USB_ACTIVE check in lpwr_is_allow_timeout() cannot
+     * cover the slave either, since it has no USB of its own; the only thing
+     * keeping it awake is the master's 2s USER_SYNC_MMS sync.
+     *
+     * In USB mode we are wired, so there is no battery to save on either half.
+     */
+    if (wireless_get_current_devs() == DEVS_USB) {
         return false;
     }
 
