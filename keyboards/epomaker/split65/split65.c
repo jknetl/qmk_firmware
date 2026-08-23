@@ -337,7 +337,73 @@ bool lpwr_is_allow_presleep_hook(void) {
     return true;
 }
 
+/* USB re-attach watchdog.
+ *
+ * The only code that re-attaches the D+ pull-up once the USB link goes down is
+ * lpwr_is_allow_wakeup_hook() in linker/wireless/lowpower.c, and that runs only
+ * in the LPWR_WAKEUP state. lpwr_is_allow_timeout_hook() above keeps us out of
+ * the low-power state machine altogether while in USB mode, so while wired that
+ * path is unreachable. QMK's own recovery -- the USB_SUSPENDED loop in
+ * protocol_pre_task() -- is compiled out by NO_USB_STARTUP_CHECK, set in
+ * linker/wireless/wireless.mk.
+ *
+ * usb_remote_wakeup() (linker/wireless/transport.c) does notice the link is
+ * down after USB_POWER_DOWN_DELAY, but its only response is
+ * lpwr_set_timeout_manual(true), which lpwr_is_allow_timeout() then discards
+ * through that same hook.
+ *
+ * Net effect: if the host disappears without VBUS dropping at the keyboard --
+ * a hub or dock re-enumerating, or a PC cold power-on -- the board never
+ * re-attaches and only a physical unplug brings it back. See
+ * carlosedp/qmk_firmware#21.
+ *
+ * Re-attach directly instead of routing through the low-power state machine.
+ * USB_SUSPENDED is deliberately excluded: that is an ordinary host suspend,
+ * where we must stay put so remote wakeup keeps working. We act only on states
+ * that mean "not enumerated" while the cable is still powered.
+ */
+#    ifndef USB_REATTACH_TIMEOUT
+#        define USB_REATTACH_TIMEOUT 5000
+#    endif
+
+static void usb_reattach_task(void) {
+    extern bool     charging_state;
+    static uint32_t not_active_since = 0;
+
+    if (!is_keyboard_master() || wireless_get_current_devs() != DEVS_USB) {
+        not_active_since = 0;
+        return;
+    }
+
+    /* Enumerated and running, or legitimately suspended by the host. */
+    if (USB_DRIVER.state == USB_ACTIVE || USB_DRIVER.state == USB_SUSPENDED) {
+        not_active_since = 0;
+        return;
+    }
+
+    /* No powered cable present -- nothing to re-attach to. */
+    if (!charging_state) {
+        not_active_since = 0;
+        return;
+    }
+
+    if (!not_active_since) {
+        not_active_since = timer_read32();
+        return;
+    }
+
+    if (timer_elapsed32(not_active_since) < USB_REATTACH_TIMEOUT) {
+        return;
+    }
+
+    not_active_since = 0;
+    usb_power_connect();
+    restart_usb_driver(&USBD1);
+}
+
 void wireless_post_task(void) {
+    usb_reattach_task();
+
     // auto switching devs
     if (post_init_timer && timer_elapsed32(post_init_timer) >= 100) {
         md_send_devctrl(MD_SND_CMD_DEVCTRL_FW_VERSION);   // get the module fw version.
