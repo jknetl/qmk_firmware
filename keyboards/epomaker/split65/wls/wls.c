@@ -205,9 +205,12 @@ void palcallback_cb(uint8_t line) {
 
 void lpwr_stop_hook_pre(void) {
     if (is_keyboard_master()) {
-        // Master controls its LED pins via LED_POWER_EN defines
+        // Master controls its LED pins via LED_POWER_EN defines.
+        // NOTE: the second rail is LED_POWER_EN2_PIN (A8). A9 is
+        // SERIAL_USART_TX_PIN -- driving it low here clamped the split UART TX
+        // line on entering STOP mode while leaving LED rail 2 powered.
         gpio_write_pin_low(LED_POWER_EN_PIN);
-        gpio_write_pin_low(A9);
+        gpio_write_pin_low(LED_POWER_EN2_PIN);
     } else {
         // Don't power-cycle the slave LED rails here; brief/erroneous LPWR stop
         // entries can present as a visible RGB off/on flicker on the right half.
